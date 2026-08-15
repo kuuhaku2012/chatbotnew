@@ -1,0 +1,9 @@
+python-dotenv==1.2.2
+fastapi==0.141.1
+uvicorn==0.41.0
+groq==1.6.0
+streamlit==1.61.0
+requests==2.32.5
+chromadb==1.5.9
+pydantic==2.12.5
+sentence-transformers==5.6.1

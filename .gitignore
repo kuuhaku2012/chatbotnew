@@ -1,0 +1,17 @@
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Database & Logs
+# The prepared vector database is part of the public demo artifact.
+# It contains embeddings and public/project source text, never credentials.
+!chroma_db/
+logs/
+*.log
