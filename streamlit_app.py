@@ -29,7 +29,13 @@ try:
 except FileNotFoundError:
     pass
 
-from main import process_chat  # noqa: E402
+from main import get_retriever, process_chat  # noqa: E402
+
+
+@st.cache_resource(show_spinner="Đang tải mô hình tra cứu lần đầu...")
+def load_retriever():
+    """Share one model/index across reruns and user sessions."""
+    return get_retriever()
 
 
 st.set_page_config(
@@ -46,6 +52,8 @@ st.caption(
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+MAX_STORED_MESSAGES = 20
 
 with st.sidebar:
     st.subheader("Câu hỏi gợi ý")
@@ -80,7 +88,11 @@ if prompt:
     with st.chat_message("assistant"):
         with st.spinner("Đang tra cứu..."):
             try:
-                result = process_chat(prompt, history=history)
+                result = process_chat(
+                    prompt,
+                    history=history,
+                    retriever_instance=load_retriever(),
+                )
                 answer = result.get("response") or "Không nhận được phản hồi."
                 st.markdown(answer)
             except Exception:
@@ -95,6 +107,8 @@ if prompt:
                 )
                 st.error(answer)
     st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.messages = st.session_state.messages[-MAX_STORED_MESSAGES:]
 
 st.divider()
 st.caption("Trường hợp khẩn cấp về cháy, nổ hoặc cứu nạn, gọi 114 ngay.")
+

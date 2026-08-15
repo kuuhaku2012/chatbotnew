@@ -27,9 +27,7 @@ import os
 import re
 from pathlib import Path
 
-import chromadb
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 EMBED_MODEL_NAME = "intfloat/multilingual-e5-base"
 
@@ -83,6 +81,9 @@ class TieredRetriever:
     def __init__(self, db_path="./chroma_db", kb_chunks_path="data/kb_chunks.jsonl",
                  kb_max_distance=0.13, legal_max_distance=0.17, top_k=3,
                  portable_index_path=None):
+        # Delay PyTorch/Transformers until the first real question.
+        from sentence_transformers import SentenceTransformer
+
         self.model = SentenceTransformer(EMBED_MODEL_NAME)
         self.kb_max_distance = kb_max_distance
         self.legal_max_distance = legal_max_distance
@@ -99,6 +100,9 @@ class TieredRetriever:
             self.kb_coll = None
             self.legal_coll = None
         else:
+            # The portable Streamlit deployment does not use Chroma.
+            import chromadb
+
             client = chromadb.PersistentClient(path=db_path)
             self.kb_coll = client.get_collection("kb_variants")
             self.legal_coll = client.get_collection("legal_articles")
@@ -248,3 +252,4 @@ class TieredRetriever:
             "legal_distance": legal_best_dist,
             "message": "Không tìm thấy nội dung đủ liên quan ở cả hai tầng — cần chuyển cán bộ trực ban.",
         }
+

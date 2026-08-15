@@ -14,6 +14,7 @@ import sys
 import json
 import time
 from datetime import datetime
+from functools import lru_cache
 from typing import Dict, Any, Optional, Callable
 
 from fastapi import FastAPI, HTTPException
@@ -39,13 +40,28 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 KB_CHUNKS_PATH = os.path.join(DATA_DIR, "kb_chunks.jsonl")
 
-# Khởi tạo TieredRetriever với ngưỡng đã hiệu chỉnh
-retriever = TieredRetriever(
-    db_path=DB_PATH,
-    kb_chunks_path=KB_CHUNKS_PATH,
-    kb_max_distance=0.13,
-    legal_max_distance=0.17,
-)
+@lru_cache(maxsize=1)
+def get_retriever() -> TieredRetriever:
+    """Create one retriever/model per worker, on the first real query."""
+    return TieredRetriever(
+        db_path=DB_PATH,
+        kb_chunks_path=KB_CHUNKS_PATH,
+        kb_max_distance=0.13,
+        legal_max_distance=0.17,
+    )
+
+
+class _LazyRetrieverProxy:
+    """Keep the historical interface without loading the model on import."""
+
+    def retrieve(self, query):
+        return get_retriever().retrieve(query)
+
+    def retrieve_raw(self, query):
+        return get_retriever().retrieve_raw(query)
+
+
+retriever = _LazyRetrieverProxy()
 
 # Đảm bảo thư mục logs tồn tại
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
@@ -121,7 +137,8 @@ def process_chat(
     message: str,
     history: list[dict] = [],
     api_key: Optional[str] = None,
-    llm_fn: Optional[Callable[[str, str], str]] = None
+    llm_fn: Optional[Callable[[str, str], str]] = None,
+    retriever_instance: Optional[TieredRetriever] = None,
 ) -> Dict[str, Any]:
     start_time = time.time()
     
@@ -153,7 +170,8 @@ def process_chat(
         }
 
     # 2. Gọi TieredRetriever (CHỈ DÙNG DUY NHẤT TIN NHẮN MỚI NHẤT, KHÔNG NỐI/GHÉP HISTORY)
-    ret_res = retriever.retrieve(message)
+    active_retriever = retriever_instance or get_retriever()
+    ret_res = active_retriever.retrieve(message)
     tier = ret_res.get("tier")
 
     hist_str = format_history(history)
@@ -267,3 +285,4 @@ def chat_endpoint(req: ChatRequest):
         return process_chat(req.message, req.history, api_key=req.api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
