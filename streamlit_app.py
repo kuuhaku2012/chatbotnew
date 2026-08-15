@@ -16,6 +16,11 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "app"))
 
+# The public deployment uses a platform-independent NumPy index. Chroma's
+# persisted HNSW files were built on Windows and may fail when queried on the
+# Linux workers used by Streamlit Community Cloud.
+os.environ.setdefault("CHATBOT_PORTABLE_RETRIEVAL", "1")
+
 # Community Cloud exposes values entered in App settings > Secrets through
 # st.secrets. Keep local .env support in app.main for development.
 try:
@@ -79,6 +84,11 @@ if prompt:
                 answer = result.get("response") or "Không nhận được phản hồi."
                 st.markdown(answer)
             except Exception:
+                # Keep technical details out of the public UI, but preserve the
+                # traceback in Streamlit's protected app logs for diagnosis.
+                import logging
+
+                logging.exception("Chat request failed")
                 answer = (
                     "Hệ thống đang tạm thời chưa xử lý được yêu cầu. Anh/chị vui lòng "
                     "thử lại sau hoặc liên hệ cán bộ phụ trách."

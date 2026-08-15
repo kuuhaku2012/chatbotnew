@@ -23,8 +23,12 @@ Cach dung:
 """
 
 import json
+import os
 import re
+from pathlib import Path
+
 import chromadb
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 EMBED_MODEL_NAME = "intfloat/multilingual-e5-base"
@@ -77,14 +81,27 @@ def decide_tier(kb_best_distance, legal_best_distance, kb_max_distance,
 
 class TieredRetriever:
     def __init__(self, db_path="./chroma_db", kb_chunks_path="data/kb_chunks.jsonl",
-                 kb_max_distance=0.13, legal_max_distance=0.17, top_k=3):
+                 kb_max_distance=0.13, legal_max_distance=0.17, top_k=3,
+                 portable_index_path=None):
         self.model = SentenceTransformer(EMBED_MODEL_NAME)
-        client = chromadb.PersistentClient(path=db_path)
-        self.kb_coll = client.get_collection("kb_variants")
-        self.legal_coll = client.get_collection("legal_articles")
         self.kb_max_distance = kb_max_distance
         self.legal_max_distance = legal_max_distance
         self.top_k = top_k
+        self.portable = None
+
+        if portable_index_path is None:
+            portable_index_path = (
+                Path(kb_chunks_path).resolve().parent / "portable_retrieval.npz"
+            )
+        use_portable = os.getenv("CHATBOT_PORTABLE_RETRIEVAL", "0") == "1"
+        if use_portable:
+            self._load_portable_index(portable_index_path)
+            self.kb_coll = None
+            self.legal_coll = None
+        else:
+            client = chromadb.PersistentClient(path=db_path)
+            self.kb_coll = client.get_collection("kb_variants")
+            self.legal_coll = client.get_collection("legal_articles")
 
         # lookup chunk_id -> KB_CHUNK day du (de lay CANONICAL_ANSWER, GUARDRAIL...)
         self.kb_lookup = {}
@@ -92,6 +109,57 @@ class TieredRetriever:
             for line in f:
                 c = json.loads(line)
                 self.kb_lookup[c["chunk_id"]] = c
+
+    def _load_portable_index(self, path):
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Portable retrieval index not found: {path}")
+        data = np.load(path, allow_pickle=False)
+        self.portable = {
+            "kb_embeddings": data["kb_embeddings"],
+            "kb_chunk_ids": data["kb_chunk_ids"],
+            "kb_documents": data["kb_documents"],
+            "legal_embeddings": data["legal_embeddings"],
+            "legal_documents": data["legal_documents"],
+            "legal_metadatas": [
+                json.loads(value) for value in data["legal_metadatas"].tolist()
+            ],
+        }
+
+    def _portable_query(self, query_embedding, tier):
+        matrix = self.portable[f"{tier}_embeddings"]
+        query_vector = np.asarray(query_embedding[0], dtype=np.float32)
+        distances = 1.0 - matrix @ query_vector
+        indexes = np.argsort(distances)[: self.top_k]
+        if tier == "kb":
+            metadatas = [
+                {"chunk_id": str(self.portable["kb_chunk_ids"][index])}
+                for index in indexes
+            ]
+            documents = [
+                str(self.portable["kb_documents"][index]) for index in indexes
+            ]
+        else:
+            metadatas = [self.portable["legal_metadatas"][index] for index in indexes]
+            documents = [
+                str(self.portable["legal_documents"][index]) for index in indexes
+            ]
+        return {
+            "distances": [[float(distances[index]) for index in indexes]],
+            "metadatas": [metadatas],
+            "documents": [documents],
+        }
+
+    def _query_both_collections(self, query_embedding):
+        if self.portable is not None:
+            return (
+                self._portable_query(query_embedding, "kb"),
+                self._portable_query(query_embedding, "legal"),
+            )
+        return (
+            self.kb_coll.query(query_embeddings=query_embedding, n_results=self.top_k),
+            self.legal_coll.query(query_embeddings=query_embedding, n_results=self.top_k),
+        )
 
     def _embed_query(self, text):
         normalized = normalize_query(text)
@@ -102,8 +170,7 @@ class TieredRetriever:
     def retrieve_raw(self, query):
         q_emb = self._embed_query(query)
 
-        kb_res = self.kb_coll.query(query_embeddings=q_emb, n_results=self.top_k)
-        legal_res = self.legal_coll.query(query_embeddings=q_emb, n_results=self.top_k)
+        kb_res, legal_res = self._query_both_collections(q_emb)
 
         kb_best_dist = kb_res["distances"][0][0] if kb_res["distances"][0] else None
         legal_best_dist = legal_res["distances"][0][0] if legal_res["distances"][0] else None
@@ -127,8 +194,7 @@ class TieredRetriever:
     def retrieve(self, query):
         q_emb = self._embed_query(query)
 
-        kb_res = self.kb_coll.query(query_embeddings=q_emb, n_results=self.top_k)
-        legal_res = self.legal_coll.query(query_embeddings=q_emb, n_results=self.top_k)
+        kb_res, legal_res = self._query_both_collections(q_emb)
 
         kb_best_dist = kb_res["distances"][0][0] if kb_res["distances"][0] else None
         legal_best_dist = legal_res["distances"][0][0] if legal_res["distances"][0] else None
