@@ -23,6 +23,7 @@ Cach dung:
 """
 
 import json
+import re
 import chromadb
 from sentence_transformers import SentenceTransformer
 
@@ -34,6 +35,21 @@ GUARDRAIL_TIER2 = (
     "cho trường hợp cá nhân. Luôn khuyến nghị liên hệ cán bộ phụ trách để "
     "được hướng dẫn chính xác theo trường hợp cụ thể."
 )
+
+
+ABBREVIATION_PATTERNS = (
+    (r"\bs[đd]t\b", "số điện thoại"),
+    (r"\bca\s*xã\b", "công an xã"),
+    (r"\bca\s*phường\b", "công an phường"),
+)
+
+
+def normalize_query(text: str) -> str:
+    """Expand common citizen abbreviations without changing query intent."""
+    normalized = " ".join((text or "").strip().split())
+    for pattern, replacement in ABBREVIATION_PATTERNS:
+        normalized = re.sub(pattern, replacement, normalized, flags=re.IGNORECASE)
+    return normalized
 
 
 def decide_tier(kb_best_distance, legal_best_distance, kb_max_distance,
@@ -78,7 +94,10 @@ class TieredRetriever:
                 self.kb_lookup[c["chunk_id"]] = c
 
     def _embed_query(self, text):
-        return self.model.encode([f"query: {text}"], normalize_embeddings=True).tolist()
+        normalized = normalize_query(text)
+        return self.model.encode(
+            [f"query: {normalized}"], normalize_embeddings=True
+        ).tolist()
 
     def retrieve_raw(self, query):
         q_emb = self._embed_query(query)
@@ -116,6 +135,19 @@ class TieredRetriever:
 
         tier = decide_tier(kb_best_dist, legal_best_dist,
                             self.kb_max_distance, self.legal_max_distance)
+
+        normalized_query = normalize_query(query).lower()
+        asks_for_contact = any(
+            marker in normalized_query
+            for marker in (
+                "số điện thoại",
+                "số trực ban",
+                "liên hệ trực ban",
+                "gọi trực ban",
+            )
+        )
+        if tier == "tier2" and asks_for_contact:
+            tier = "escalate"
 
         if tier == "tier1":
             chunk_id = kb_res["metadatas"][0][0]["chunk_id"]

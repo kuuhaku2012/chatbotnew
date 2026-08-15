@@ -40,7 +40,12 @@ DB_PATH = os.path.join(BASE_DIR, "chroma_db")
 KB_CHUNKS_PATH = os.path.join(DATA_DIR, "kb_chunks.jsonl")
 
 # Khởi tạo TieredRetriever với ngưỡng đã hiệu chỉnh
-retriever = TieredRetriever(db_path=DB_PATH, kb_chunks_path=KB_CHUNKS_PATH, kb_max_distance=0.13, legal_max_distance=0.17)
+retriever = TieredRetriever(
+    db_path=DB_PATH,
+    kb_chunks_path=KB_CHUNKS_PATH,
+    kb_max_distance=0.13,
+    legal_max_distance=0.17,
+)
 
 # Đảm bảo thư mục logs tồn tại
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
