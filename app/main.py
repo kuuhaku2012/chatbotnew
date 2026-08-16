@@ -185,16 +185,35 @@ def process_chat(
         matched_chunk_id = ret_res.get("chunk_id")
         distance = ret_res.get("distance")
 
-        system_prompt = (
-            f"Bạn là trợ lý ảo hỗ trợ công an phường.\n\n"
-            f"LỊCH SỬ HỘI THOẠI GẦN ĐÂY:\n{hist_str}\n\n"
-            f"THÔNG TIN CẦN CÓ TỪ NGUỜI DÙNG: {req_entities}\n\n"
-            f"BƯỚC 1: Đọc lịch sử hội thoại và tin nhắn mới nhất của người dùng, xác định xem tổng hợp cả quá trình trao đổi người dùng đã cung cấp đủ các thông tin trên chưa.\n\n"
-            f"BƯỚC 2A - NẾU THIẾU: chỉ trả lời bằng ĐÚNG MỘT câu hỏi ngắn gọn, lịch sự, xưng 'Anh/chị', hỏi TRỰC TIẾP người dùng (dựa trên nội dung: {clarifying_q}). DỪNG Ở ĐÂY, không nói gì thêm.\n\n"
-            f"BƯỚC 2B - NẾU ĐÃ ĐỦ: dùng NGUYÊN NỘI DUNG căn cứ sau, diễn đạt lại tự nhiên (không copy y nguyên từng chữ), TRẢ LỜI THẲNG vào điều người dùng hỏi, KHÔNG hỏi lại, KHÔNG hỏi xác nhận lại thông tin họ vừa cho:\n"
-            f"\"{canonical_answer}\"\n"
-            f"Giữ đúng quy tắc: \"{chunk_guardrail}\"."
-        )
+        # Tạo system prompt tùy theo chunk có yêu cầu thông tin bổ sung hay không
+        has_required = bool(req_entities and req_entities.strip())
+
+        if has_required:
+            # --- Chunk có required_entities → giữ logic hỏi làm rõ ---
+            system_prompt = (
+                f"Bạn là trợ lý ảo hỗ trợ công an phường.\n\n"
+                f"LỊCH SỬ HỘI THOẠI GẦN ĐÂY:\n{hist_str}\n\n"
+                f"THÔNG TIN CẦN CÓ TỪ NGUỜI DÙNG: {req_entities}\n\n"
+                f"BƯỚC 1: Đọc lịch sử hội thoại và tin nhắn mới nhất của người dùng, xác định xem tổng hợp cả quá trình trao đổi người dùng đã cung cấp đủ các thông tin trên chưa.\n\n"
+                f"BƯỚC 2A - NẾU THIẾU: chỉ trả lời bằng ĐÚNG MỘT câu hỏi ngắn gọn, lịch sự, xưng 'Anh/chị', hỏi TRỰC TIẾP người dùng (dựa trên nội dung: {clarifying_q}). DỪNG Ở ĐÂY, không nói gì thêm.\n\n"
+                f"BƯỚC 2B - NẾU ĐÃ ĐỦ: dùng NGUYÊN NỘI DUNG căn cứ sau, diễn đạt lại tự nhiên (không copy y nguyên từng chữ), TRẢ LỜI THẲNG vào điều người dùng hỏi, KHÔNG hỏi lại, KHÔNG hỏi xác nhận lại thông tin họ vừa cho:\n"
+                f"\"{canonical_answer}\"\n"
+                f"Giữ đúng quy tắc: \"{chunk_guardrail}\"."
+            )
+        else:
+            # --- Chunk KHÔNG có required_entities → trả lời đầy đủ ngay ---
+            system_prompt = (
+                f"Bạn là trợ lý ảo hỗ trợ công an phường.\n\n"
+                f"LỊCH SỬ HỘI THOẠI GẦN ĐÂY:\n{hist_str}\n\n"
+                f"NỘI DUNG CĂN CỨ (bắt buộc dùng làm nguồn chính):\n\"{canonical_answer}\"\n\n"
+                f"HƯỚNG DẪN TRẢ LỜI:\n"
+                f"- Trả lời ĐÚNG câu hỏi của người dùng dựa trên NỘI DUNG CĂN CỨ ở trên.\n"
+                f"- Trình bày có cấu trúc rõ ràng: dùng tiêu đề in đậm (**Tiêu đề**), gạch đầu dòng, danh sách đánh số khi thích hợp.\n"
+                f"- Giữ NGUYÊN toàn bộ thông tin quan trọng: tên, chức vụ, số điện thoại, địa chỉ, tiêu chuẩn, hồ sơ.\n"
+                f"- Diễn đạt tự nhiên, thân thiện, xưng 'Anh/chị'. KHÔNG hỏi ngược lại người dùng.\n"
+                f"- KHÔNG bịa thêm thông tin ngoài nội dung căn cứ.\n"
+                f"- Giữ đúng quy tắc: \"{chunk_guardrail}\"."
+            )
 
         response_text = llm_fn(system_prompt, message)
         latency_ms = int((time.time() - start_time) * 1000)
